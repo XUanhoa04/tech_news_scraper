@@ -1,43 +1,34 @@
+import time
+import logging
 import requests
 from bs4 import BeautifulSoup
 from typing import Optional
-import logging
+
+logger = logging.getLogger(__name__)
+
 
 class BaseScraper:
-    def __init__(self, timeout: int = 10):
+    def __init__(self, timeout=10, delay=0.5):
         self.timeout = timeout
-        self.headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }
+        self.delay = delay
+        self.session = requests.Session()
+        self.session.headers.update({
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        })
 
     def fetch_page(self, url: str) -> Optional[BeautifulSoup]:
+        """Tai va parse HTML cua mot trang web"""
         try:
-            response = requests.get(url,headers= self.headers, timeout=self.timeout)
-            if response.status_code != 200:
-                print(f'Failed to fetch {url}, status code : {response.status_code}')
-                return None
-            soup = BeautifulSoup(response.content, 'html.parser')
-            return soup
+            time.sleep(self.delay)  # tranh bi block
+            response = self.session.get(url, timeout=self.timeout)
+            response.raise_for_status()
+            return BeautifulSoup(response.content, "html.parser")
         except requests.Timeout:
-            logging.warning(f'timeout when fetching {url}')
+            logger.warning(f"Timeout khi tai: {url}")
+            return None
+        except requests.HTTPError as e:
+            logger.warning(f"HTTP error {e.response.status_code}: {url}")
             return None
         except requests.RequestException as e:
-            logging.warning(f'error when fetching {url}: {e}')
+            logger.warning(f"Request error: {url} - {e}")
             return None
-        except Exception as e:
-            logging.warning(f'error when fetching {url}: {e}')
-            return None
-
-if __name__ == "__main__":
-    scraper = BaseScraper()
-    soup = scraper.fetch_page('https://vnexpress.net/khoa-hoc')
-    
-    if(soup):
-        print("fetch successfull")
-        print(f"Title tag: {soup.title.text if soup.title else 'No title'}")
-    else:
-        print("Fetch failed")
-    
-
-
-    

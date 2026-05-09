@@ -1,68 +1,96 @@
-from base import BaseScraper
-from typing import Optional, Dict
 import logging
+from typing import Optional, Dict, List
+from .base import BaseScraper
 
 logger = logging.getLogger(__name__)
 
+
 class TuoiTreScraper(BaseScraper):
-    BARE_URL = 'https://tuoitre.vn'
-    def scrape_article(self, url: str) -> Optional[Dict[str,str]]:
+    BASE_URL = "https://tuoitre.vn"
+
+    def scrape_category(self, category_url: str, max_articles=20, category_name=""):
+        """Lay danh sach bai viet tu trang chuyen muc"""
+        soup = self.fetch_page(category_url)
+        if not soup:
+            return []
+
+        articles = []
+        seen_urls = set()
+
+        for sel in ["li.news-item h3 a", "h3.title-news a", "div.box-category-item h3 a"]:
+            links = soup.select(sel)
+            if links:
+                break
+        else:
+            links = []
+
+        logger.info(f"TuoiTre [{category_name}]: tim thay {len(links)} links")
+
+        for link in links[:max_articles]:
+            url = link.get("href", "")
+            if not url.startswith("http"):
+                url = self.BASE_URL + url
+            if url in seen_urls:
+                continue
+            seen_urls.add(url)
+
+            article = self.scrape_article(url)
+            if article:
+                article["category"] = category_name
+                article["source"] = "tuoitre"
+                articles.append(article)
+                logger.info(f"  OK: {article['title'][:60]}")
+
+        return articles
+
+    def scrape_article(self, url: str) -> Optional[Dict[str, str]]:
+        """Scrape noi dung mot bai viet Tuoi Tre"""
         soup = self.fetch_page(url)
         if not soup:
             return None
+
         try:
-            # Extract title
-            title_element = soup.select_one('h1.detail-title.article-title')
-            title = title_element.get_text(strip = True) if title_element else None
+            # tieu de
+            title_el = soup.select_one("h1.detail-title") or soup.select_one("h1.article-title")
+            title = title_el.get_text(strip=True) if title_el else None
             if not title:
-                logger.warning('no title found')
-            
-            # Extract date
-            date_element = soup.select_one('div.detail-time div[data-role="publishdate"]')
-            published_date = date_element.get_text(strip = True) if date_element else None
-            if not published_date:
-                logger.warning('no date found')
+                return None
 
-            #Extract content
-            content_element = soup.select_one('div.detail-content.afcbc-body')
-            paragraphs = content_element.select('p:not(:has(img))')
-            content = "\n\n".join(
-                p.get_text(strip=True)
-                for p in paragraphs
-                if p.get_text(strip=True)
-            )
+            # ngay dang
+            date_el = soup.select_one("div.detail-time [data-role='publishdate']")
+            published_date = date_el.get_text(strip=True) if date_el else ""
+
+            # noi dung
+            content_el = soup.select_one("div.detail-content.afcbc-body") or soup.select_one("div#main-detail-body")
+            if content_el:
+                paragraphs = [p for p in content_el.select("p") if not p.select("img") and p.get_text(strip=True)]
+                content = "\n\n".join(p.get_text(strip=True) for p in paragraphs)
+            else:
+                content = None
             if not content:
-                logger.warning(f'no content found at {url}')
                 return None
 
-            #Extract author
-            author_element = soup.select_one('div.detail-author-bot a.name')
-            author = author_element.get_text(strip = True) if author_element else None
-            if not author:
-                logger.warning(f'no author found at {url}')
-                return None
-            
-            img = soup.select_one('a[data-fancybox="content"] img')
-            image_url = img.get('data-original') if img else None
-            if not image_url:
-                logger.warning(f'no author found at {url}')
+            # tac gia
+            author_el = soup.select_one("div.detail-author-bot a.name")
+            author = author_el.get_text(strip=True) if author_el else "Khong ro"
 
-            return{
-                'title': title,
-                'url': url,
-                'content': content,
-                'published_date': published_date,
-                'author': author,
-                'image_url': image_url,
+            # anh
+            img_el = soup.select_one("a[data-fancybox='content'] img")
+            if img_el:
+                image_url = img_el.get("data-original") or img_el.get("src") or ""
+            else:
+                og = soup.select_one("meta[property='og:image']")
+                image_url = og.get("content") if og else ""
+
+            return {
+                "title": title,
+                "url": url,
+                "content": content,
+                "published_date": published_date,
+                "author": author,
+                "image_url": image_url or "",
             }
+
         except Exception as e:
-            logger.error(f'Error parsing article {url}: {e}')   
+            logger.error(f"Loi parse bai {url}: {e}")
             return None
-if __name__ == "__main__":
-    scraper = TuoiTreScraper()
-    test_url = 'https://tuoitre.vn/trung-quoc-co-chip-ai-nhanh-gap-100-lan-chip-manh-nhat-cua-nvidia-202512201438017.htm'
-    article = scraper.scrape_article(test_url)
-    
-    if article:
-        print("✅ Tuổi Trẻ scraper works")
-        print(f"Title: {article['title']}")
